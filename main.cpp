@@ -5,6 +5,7 @@
 #include <string>
 #include <string_view>
 #include <fcntl.h>
+#include "unistd.h"
 
 
 #include "catch.hpp"
@@ -37,6 +38,7 @@ static void read_till(std::atomic<bool>* should_term, const fs::path& fn)
       read(fd, &c, 1);
       write(2, &c, 1);
     };
+    gatep->store(false);
   });
 
   thrd->detach();
@@ -56,7 +58,7 @@ void create_n_hold(std::atomic<bool>* should_term, fs::path fn, string_view dbg_
 }
 
 static string good_fname1 =
-  "/tmp/tpipe_1";  // make sure someone is already reading from this pipe
+  "/tmp/tpipe_1";  // NOTE!!! make sure someone is already reading from this pipe
 static string bad_fname1 = "/tmp/notthere";
 
 
@@ -103,7 +105,10 @@ TEST_CASE("our own pipe", "[clients]")
   REQUIRE(client1.has_value());
 
   should_term.store(true);
-  //unlink(fpt1);
+  while (should_term.load())
+    sleep(1);
+
+  unlink(fpt1.c_str());
 }
 
 
