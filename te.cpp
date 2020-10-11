@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <iostream>
 #include <string_view>
+#include "errno.h"
 
 //#include "test_events.h"
 #include "te.h"
@@ -80,13 +81,14 @@ EventsPipe::EventsPipe(const std::filesystem::path& pipepath,
 
   // keep it open for output only. Will signal if the client is not maintaining an
   // active reader
-  m_fd = open(pipepath.c_str(), O_APPEND | O_RDONLY);
+  m_fd = open(pipepath.c_str(), O_APPEND | O_WRONLY | O_NDELAY);
+  std::cout << "\nerrno is: " << errno << "\n";
 }
 
 EventsPipe::~EventsPipe()
 {
   if (m_fd >= 0)
-    close(m_fd);
+    ;  // close(m_fd);
 }
 
 
@@ -98,13 +100,14 @@ EventsPipe::~EventsPipe()
 bool EventsPipe::path_seems_safe(const std::filesystem::path& filepath)
 {
   // check the path string
-  if (std::find_if(filepath.string().begin(), filepath.string().end(),
-		   [](char ch) { return !isprint(ch); }) != filepath.string().end()) {
+  std::string fn = filepath.string();
+  if (std::find_if(fn.begin(), fn.end(),
+		   [](char ch) { return !isprint(ch); }) != fn.end()) {
     dout << "Incoming path contains non-printable chars. Rejected." << dendl;
     return false;
   }
 
-  if (filepath.string().find("..") != std::string::npos) {
+  if (fn.find("..") != std::string::npos) {
     dout << "Incoming path contains '..'. Rejected." << dendl;
     return false;
   }
@@ -128,10 +131,17 @@ pip_token_t EventsPipe::make_token()
   return ++handout;
 }
 
+void EventsPipe::send_event(event_req_id rid, OutBuf buffer)
+{
+  std::cout << "WR: to " << m_fd << ": " << rid << " [" << buffer << "]\n";
+  //write(m_fd, 2, (char*)&rid);
+  //write(m_fd, buffer.length(), buffer.
+}
+
 
 // -------------------------------------------------------------------------
 
-bool Testevents::register_for_events(pip_token_t client_tok,
+bool TesteventsDB::register_for_events(pip_token_t client_tok,
 				     event_req_id req_id,
 				     const event_id_t& ev_id)
 {
@@ -152,7 +162,7 @@ bool Testevents::register_for_events(pip_token_t client_tok,
 
   if (req != m_registrations.end()) {
 
-    if (req->m_out_pipe->get_token() != client_tok) {
+    if (*req->m_out_pipe->get_token() != client_tok) {
       dout << "Events-pipe w same req ID registered by another client" << dendl;
       return false;
     }
@@ -172,7 +182,7 @@ bool Testevents::register_for_events(pip_token_t client_tok,
   return true;
 }
 
-bool Testevents::unregister_events(pip_token_t client_tok, event_req_id req_id)
+bool TesteventsDB::unregister_events(pip_token_t client_tok, event_req_id req_id)
 {
   std::unique_lock lk(m_regis_lock);
   auto req =
@@ -183,7 +193,7 @@ bool Testevents::unregister_events(pip_token_t client_tok, event_req_id req_id)
     return false;
   }
 
-  if (req->m_out_pipe->get_token() != client_tok) {
+  if (*req->m_out_pipe->get_token() != client_tok) {
     dout << "Events-pipe w same req ID registered by another client" << dendl;
     return false;
   }
@@ -193,7 +203,7 @@ bool Testevents::unregister_events(pip_token_t client_tok, event_req_id req_id)
 }
 
 
-bool Testevents::should_post(const event_id_t& evnt)
+bool TesteventsDB::should_post(const event_id_t& evnt)
 {
   std::unique_lock lk(m_regis_lock);
 
@@ -209,7 +219,7 @@ bool Testevents::should_post(const event_id_t& evnt)
 
 
 
-void Testevents::post_event(OutBuf bf, const event_id_t& evnt)
+void TesteventsDB::post_event(OutBuf bf, const event_id_t& evnt)
 {
   std::unique_lock lk(m_regis_lock);
 
@@ -224,3 +234,45 @@ void Testevents::post_event(OutBuf bf, const event_id_t& evnt)
     }
   });
 }
+
+
+maybe_pip_token TesteventsDB::client_registration(const std::filesystem::path& pipepath,
+						maybe_pip_token client_token)
+{
+  std::unique_lock lk(m_pipestbl_lock);
+
+  if (client_token && m_clients.count(*client_token)) {
+    // already registered
+    return {};
+  }
+
+  // creating separately, as I wish to verify success
+  auto new_ent = make_unique<EventsPipe>(pipepath, client_token);
+  if (!new_ent->get_token()) {
+    // can't attach to the specified pipe
+    return {};
+  }
+
+  auto final_token = new_ent->get_token().value();
+
+  m_clients.insert(std::pair(final_token, std::move(new_ent)));
+  return final_token;
+}
+
+void TesteventsDB::client_unregistration(pip_token_t client_token)
+{
+  std::unique_lock lk(m_pipestbl_lock); // replace w scoped
+  std::unique_lock lk2(m_regis_lock);
+
+  m_clients.erase(client_token);
+}
+
+
+TesteventRegistration::TesteventRegistration(EventsPipe& ev_pipe,
+					     event_req_id req_id,
+					     const event_id_t& ev_id) :
+					     m_event_id{ev_id},
+					     m_req_id{req_id},
+					     m_out_pipe{&ev_pipe}
+
+{}

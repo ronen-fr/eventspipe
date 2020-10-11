@@ -46,7 +46,7 @@ struct event_id_t {
   domain_t m_domain;
   group_t m_group;
   events_t m_event;
-  bool same_dg(const event_id_t& o) const
+  [[nodiscard]] bool same_dg(const event_id_t& o) const
   {
     return m_domain == o.m_domain && m_group == o.m_group;
   }
@@ -65,6 +65,7 @@ using OutBuf = std::string_view;
 
 */
 // the pipe of one client
+// MUST BE REF-COUNTED!!!!
 class EventsPipe {
 public:
   EventsPipe(const std::filesystem::path& pipepath, maybe_pip_token client_token);
@@ -74,7 +75,7 @@ public:
   // int get_fd() const { return m_fd; }
   void send_event(event_req_id, OutBuf buffer);
 
-  pip_token_t get_token() const { return m_token; }
+  maybe_pip_token get_token() const { return (m_fd >= 0) ? maybe_pip_token{m_token} : maybe_pip_token{}; }
 
 private:
   pip_token_t m_token;
@@ -87,7 +88,7 @@ private:
 
 class TesteventRegistration {
 public:
-  TesteventRegistration(const EventsPipe& ev_pipe, event_req_id req_id, const event_id_t& ev_id);
+  TesteventRegistration(EventsPipe& ev_pipe, event_req_id req_id, const event_id_t& ev_id);
 
   // events_t m_mask;
   event_id_t m_event_id;
@@ -96,9 +97,14 @@ public:
   bool m_obsolete{false};
 };
 
-class Testevents {
+class TesteventsDB {
 public:
-  Testevents() = default;
+  TesteventsDB() = default;
+
+  [[nodiscard]] maybe_pip_token client_registration(const std::filesystem::path& pipepath, maybe_pip_token client_token);
+  void client_unregistration(pip_token_t client_token);
+
+
   [[nodiscard]] bool register_for_events(pip_token_t client_tok,
                                          event_req_id req_id,
                                          const event_id_t& ev_id);
@@ -113,7 +119,8 @@ public:  // interface for event posters
 private:
   /*ceph::*/ Formatter m_formatter;
 
-  std::map<pip_token_t, EventsPipe*> m_clients;
+  std::mutex m_pipestbl_lock;
+  std::map<pip_token_t, std::unique_ptr<EventsPipe>> m_clients;
   std::mutex m_regis_lock;
   std::vector<TesteventRegistration> m_registrations;
 };
