@@ -19,11 +19,12 @@ int main_17()
   return 0;
 }
 
-static string good_fname1 = "/tmp/tpipe_1";
+static string good_fname1 =
+  "/tmp/tpipe_1";  // make sure someone is already reading from this pipe
 static string bad_fname1 = "/tmp/notthere";
 
 
-TEST_CASE("Registering an event", "[Testevents]")
+TEST_CASE("Registering/unreg", "[clients]")
 {
   TesteventsDB db;
 
@@ -37,4 +38,15 @@ TEST_CASE("Registering an event", "[Testevents]")
   cout << "Client2 registration: " << client1.value_or(9999999);
   REQUIRE(!client2.has_value());
 
+  SECTION("removing client1")
+  {
+
+    // try to create a duplicate reservation. That should fail
+    auto client1dup = db.client_registration(fpt1, client1);
+    REQUIRE(!client1dup.has_value());
+
+    db.client_unregistration(*client1);
+    client1dup = db.client_registration(fpt1, client1);
+    REQUIRE(client1dup.has_value());
+  }
 }

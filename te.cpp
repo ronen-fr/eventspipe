@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <iostream>
 #include <string_view>
+
 #include "errno.h"
 
 //#include "test_events.h"
@@ -76,12 +77,16 @@ EventsPipe::EventsPipe(const std::filesystem::path& pipepath,
   //  if a token was not provided - create a random one
 
   if (!path_seems_safe(pipepath)) {
-    // dout << "rejecting incoming path. Not printed." << dendl;
+    dout << "rejecting incoming path. Not printed." << dendl;
+    return;
   }
 
   // keep it open for output only. Will signal if the client is not maintaining an
   // active reader
   m_fd = open(pipepath.c_str(), O_APPEND | O_WRONLY | O_NDELAY);
+  if (m_fd < 0)
+    dout << "Opening " << pipepath.c_str() << " failed. No active reader?" << dendl;
+
   std::cout << "\nerrno is: " << errno << "\n";
 }
 
@@ -101,8 +106,8 @@ bool EventsPipe::path_seems_safe(const std::filesystem::path& filepath)
 {
   // check the path string
   std::string fn = filepath.string();
-  if (std::find_if(fn.begin(), fn.end(),
-		   [](char ch) { return !isprint(ch); }) != fn.end()) {
+  if (std::find_if(fn.begin(), fn.end(), [](char ch) { return !isprint(ch); }) !=
+      fn.end()) {
     dout << "Incoming path contains non-printable chars. Rejected." << dendl;
     return false;
   }
@@ -134,16 +139,16 @@ pip_token_t EventsPipe::make_token()
 void EventsPipe::send_event(event_req_id rid, OutBuf buffer)
 {
   std::cout << "WR: to " << m_fd << ": " << rid << " [" << buffer << "]\n";
-  //write(m_fd, 2, (char*)&rid);
-  //write(m_fd, buffer.length(), buffer.
+  // write(m_fd, 2, (char*)&rid);
+  // write(m_fd, buffer.length(), buffer.
 }
 
 
 // -------------------------------------------------------------------------
 
 bool TesteventsDB::register_for_events(pip_token_t client_tok,
-				     event_req_id req_id,
-				     const event_id_t& ev_id)
+				       event_req_id req_id,
+				       const event_id_t& ev_id)
 {
   //  locate the client by its token
   auto client_en = m_clients.find(client_tok);
@@ -237,7 +242,7 @@ void TesteventsDB::post_event(OutBuf bf, const event_id_t& evnt)
 
 
 maybe_pip_token TesteventsDB::client_registration(const std::filesystem::path& pipepath,
-						maybe_pip_token client_token)
+						  maybe_pip_token client_token)
 {
   std::unique_lock lk(m_pipestbl_lock);
 
@@ -261,7 +266,7 @@ maybe_pip_token TesteventsDB::client_registration(const std::filesystem::path& p
 
 void TesteventsDB::client_unregistration(pip_token_t client_token)
 {
-  std::unique_lock lk(m_pipestbl_lock); // replace w scoped
+  std::unique_lock lk(m_pipestbl_lock);	 // replace w scoped
   std::unique_lock lk2(m_regis_lock);
 
   m_clients.erase(client_token);
@@ -270,9 +275,7 @@ void TesteventsDB::client_unregistration(pip_token_t client_token)
 
 TesteventRegistration::TesteventRegistration(EventsPipe& ev_pipe,
 					     event_req_id req_id,
-					     const event_id_t& ev_id) :
-					     m_event_id{ev_id},
-					     m_req_id{req_id},
-					     m_out_pipe{&ev_pipe}
+					     const event_id_t& ev_id)
+    : m_event_id{ev_id}, m_req_id{req_id}, m_out_pipe{&ev_pipe}
 
 {}
