@@ -29,6 +29,7 @@ int main_17()
 #include <atomic>
 #include <thread>
 
+#if 0
 static void read_till(std::atomic<bool>* should_term, const fs::path& fn)
 {
   int fd = open(fn.c_str(), O_RDWR);
@@ -55,6 +56,7 @@ void create_n_hold(std::atomic<bool>* should_term, const fs::path& fn, string_vi
     read_till(should_term, fn);
   }
 }
+#endif
 
 class PipeClientWrap {
  public:
@@ -177,6 +179,12 @@ class PipeClientWrap {
 bool PipeClientWrap::verify_name(fs::path filepath)
 {
   std::string fn = filepath.string();
+
+  if (fn.length() < 4) {
+    cout << "Incoming path is too short. Rejected.\n";
+    return false;
+  }
+
   if (std::find_if(fn.begin(), fn.end(), [](char ch) { return !isprint(ch); }) !=
       fn.end()) {
     cout << "Incoming path contains non-printable chars. Rejected.\n";
@@ -210,12 +218,12 @@ TEST_CASE("Reg_unreg_clients", "[clients]")
 
   fs::path fpt1{good_fname1};
   auto client1 = db.client_registration(fpt1, {});
-  cout << "Client1 registration: " << client1.value_or(9999999);
+  cout << "Client1 registration: " << client1.value_or(9999999) << "\n";
   REQUIRE(client1.has_value());
 
   fs::path fpt2{bad_fname1};
   auto client2 = db.client_registration(fpt2, {});
-  cout << "Client2 registration: " << client1.value_or(9999999);
+  cout << "Client2 registration: " << client1.value_or(9999999) << "\n";
   REQUIRE(!client2.has_value());
 
   SECTION("removing client1")
@@ -233,9 +241,17 @@ TEST_CASE("Reg_unreg_clients", "[clients]")
 
 static string good_fname3 = "/tmp/we_will_create";
 
-TEST_CASE("our own pipe", "[clients]")
+TEST_CASE("our_own_pipe", "[clients]")
 {
   TesteventsDB db;
+  fs::path fpt{good_fname3};
+  PipeClientWrap reader{fpt, "our_own_pipe"};
+  REQUIRE(reader.is_valid());
+  auto client1 = db.client_registration(fpt, {});
+  cout << "Client1 registration: " << client1.value_or(9999999);
+  REQUIRE(client1.has_value());
+
+/*  TesteventsDB db;
 
   unlink(good_fname3.c_str());
   fs::path fpt1{good_fname3};
@@ -250,7 +266,7 @@ TEST_CASE("our own pipe", "[clients]")
   while (should_term.load())
     sleep(1);
 
-  unlink(fpt1.c_str());
+  unlink(fpt1.c_str());*/
 }
 
 // event-groups for registration
