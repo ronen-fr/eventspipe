@@ -29,34 +29,6 @@ int main_17()
 #include <atomic>
 #include <thread>
 
-#if 0
-static void read_till(std::atomic<bool>* should_term, const fs::path& fn)
-{
-  int fd = open(fn.c_str(), O_RDWR);
-
-  auto thrd = new std::thread([=, gatep = should_term]() {
-    while (!gatep->load()) {
-      int c;
-      read(fd, &c, 1);
-      write(2, &c, 1);
-    };
-    gatep->store(false);
-  });
-
-  thrd->detach();
-}
-
-
-// create a named pipe, and a process to keep reading it
-void create_n_hold(std::atomic<bool>* should_term, const fs::path& fn, string_view dbg_nm)
-{
-  // verify the path is absolute, and does not exist
-  auto isprob = mkfifo(fn.c_str(), 0644);
-  if (!isprob) {
-    read_till(should_term, fn);
-  }
-}
-#endif
 
 class PipeClientWrap {
  public:
@@ -250,23 +222,6 @@ TEST_CASE("our_own_pipe", "[clients]")
   auto client1 = db.client_registration(fpt, {});
   cout << "Client1 registration: " << client1.value_or(9999999);
   REQUIRE(client1.has_value());
-
-/*  TesteventsDB db;
-
-  unlink(good_fname3.c_str());
-  fs::path fpt1{good_fname3};
-  std::atomic<bool> should_term{false};
-  create_n_hold(&should_term, fpt1, "fpt1");
-
-  auto client1 = db.client_registration(fpt1, {});
-  cout << "Client1 registration: " << client1.value_or(9999999);
-  REQUIRE(client1.has_value());
-
-  should_term.store(true);
-  while (should_term.load())
-    sleep(1);
-
-  unlink(fpt1.c_str());*/
 }
 
 // event-groups for registration
@@ -297,11 +252,28 @@ TEST_CASE("reg_unreg_events", "[events]")
   REQUIRE(db.register_for_events(*client1, 102, evm2));
   REQUIRE(db.register_for_events(*client1, 101, evm1v2));
 
-  // verify that the registrations are there
+  SECTION("ev_reg_1")
+  {
+    // verify that the registrations are there
 
-  REQUIRE(db.should_post(ev_1));
-  REQUIRE(!db.should_post(ev_2));
-  REQUIRE(db.should_post(ev_3));
-  REQUIRE(!db.should_post(ev_4));
-  REQUIRE(!db.should_post(ev_5));
+    REQUIRE(db.should_post(ev_1));
+    REQUIRE(!db.should_post(ev_2));
+    REQUIRE(db.should_post(ev_3));
+    REQUIRE(!db.should_post(ev_4));
+    REQUIRE(!db.should_post(ev_5));
+  }
+  SECTION("ev_unreg_2")
+  {
+    // client exists, req-id OK
+    REQUIRE(db.should_post(ev_3));
+    REQUIRE(db.unregister_events(*client1, 102));
+    REQUIRE(!db.should_post(ev_3));
+
+    // client exists, req-id already removed
+    REQUIRE(!db.unregister_events(*client1, 102));
+
+    // client exists, req-id wrong
+    REQUIRE(!db.unregister_events(*client1, 199));
+    REQUIRE(db.should_post(ev_1));
+  }
 }
