@@ -106,7 +106,7 @@ class PipeClientWrap {
 	if (events[0].data.fd == fd) {
 	  char bf[128];
 	  auto n = read(fd, bf, sizeof(bf));
-	  write(2, bf, n);
+	  write(1, bf, n);
 	}
       };
       cout << "reader done " << endl;
@@ -189,6 +189,8 @@ TEST_CASE("Reg_unreg_clients", "[clients]")
   TesteventsDB db;
 
   fs::path fpt1{good_fname1};
+  PipeClientWrap reader{fpt1, "Reg_unreg_clients"};
+  REQUIRE(reader.is_valid());
   auto client1 = db.client_registration(fpt1, {});
   cout << "Client1 registration: " << client1.value_or(9999999) << "\n";
   REQUIRE(client1.has_value());
@@ -228,6 +230,8 @@ TEST_CASE("our_own_pipe", "[clients]")
 static constexpr const event_id_t evm1{0x400, 0x0001, 0x00000002};
 static constexpr const event_id_t evm1v2{0x400, 0x0001, 0x00000007};
 static constexpr const event_id_t evm2{0x400, 0x0002, 0x0ff0};
+static constexpr const event_id_t evmH{0x400, 0x0003, 0xf000};
+static constexpr const event_id_t evmL{0x400, 0x0003, 0x0f00};
 
 // "actual" specific events
 static constexpr const event_id_t ev_1{0x400, 0x0001, 0x0001};
@@ -235,6 +239,8 @@ static constexpr const event_id_t ev_2{0x400, 0x0001, 0x00f0};
 static constexpr const event_id_t ev_3{0x400, 0x0002, 0x0100};
 static constexpr const event_id_t ev_4{0x400, 0x0002, 0x0002};
 static constexpr const event_id_t ev_5{0xf90, 0x0002, 0x0002};
+static constexpr const event_id_t ev_H{0x400, 0x0003, 0x1000};
+static constexpr const event_id_t ev_6{0x400, 0x0002, 0x0080};
 
 
 TEST_CASE("reg_unreg_events", "[events]")
@@ -276,4 +282,54 @@ TEST_CASE("reg_unreg_events", "[events]")
     REQUIRE(!db.unregister_events(*client1, 199));
     REQUIRE(db.should_post(ev_1));
   }
+
+  SECTION("basic_posting") {
+        OutBuf line1{"hello"};
+	db.post_event(line1, ev_1);
+  }
+}
+
+static string clnt1_path = "/tmp/cpipe1";
+static string clnt2_path = "/tmp/cpipe2";
+
+
+TEST_CASE("client_unreg", "[clients]")
+{
+  TesteventsDB db;
+
+  // register client 1
+  fs::path fpt1{clnt1_path};
+  PipeClientWrap reader1{fpt1, "client_unreg 1"};
+  REQUIRE(reader1.is_valid());
+  auto client1 = db.client_registration(fpt1, pip_token_t{21});
+  cout << "Client1 registration: " << client1.value_or(9999999);
+  REQUIRE(client1.has_value());
+
+  // register client 2
+  fs::path fpt2{clnt2_path};
+  PipeClientWrap reader2{fpt2, "client_unreg 2"};
+  REQUIRE(reader2.is_valid());
+  auto client2 = db.client_registration(fpt2, pip_token_t{21}); // same token!
+  cout << "Client2 registration (should have failed): " << client2.value_or(9999999);
+  REQUIRE(!client2.has_value());
+
+  // trying again to register client 2
+  client2 = db.client_registration(fpt2, pip_token_t{22}); // same token!
+  cout << "Client2 registration: " << client2.value_or(9999999);
+  REQUIRE(client2.has_value());
+
+
+  REQUIRE(db.register_for_events(*client1, 104, evmH));
+  REQUIRE(db.register_for_events(*client2, 105, evmL));
+  REQUIRE(db.register_for_events(*client1, 106, evm2));
+  REQUIRE(db.register_for_events(*client2, 107, evm2));
+
+  // now - remove client 1
+  REQUIRE(db.should_post(ev_H));
+  OutBuf line1{"hello"};
+  db.post_event(line1, ev_H);
+  db.client_unregistration(*client1);
+  db.post_event(line1, ev_H);
+  REQUIRE(!db.should_post(ev_H));
+  REQUIRE(db.should_post(ev_6));
 }

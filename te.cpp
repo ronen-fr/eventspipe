@@ -271,6 +271,12 @@ void TesteventsDB::client_unregistration(pip_token_t client_token)
   std::unique_lock lk(m_pipestbl_lock);	 // replace w scoped
   std::unique_lock lk2(m_regis_lock);
 
+  // remove all registrations made by this client
+  m_registrations.erase(
+    remove_if(m_registrations.begin(), m_registrations.end(),
+	      [&](auto e) { return e.m_out_pipe->m_token == client_token; }),
+    m_registrations.end());
+
   m_clients.erase(client_token);
 }
 

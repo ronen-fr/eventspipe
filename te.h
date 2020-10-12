@@ -67,6 +67,7 @@ using OutBuf = std::string_view;
 // the pipe of one client
 // MUST BE REF-COUNTED!!!!
 class EventsPipe {
+friend class TesteventsDB;
 public:
   EventsPipe(const std::filesystem::path& pipepath, maybe_pip_token client_token);
   ~EventsPipe();
