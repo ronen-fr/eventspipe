@@ -84,8 +84,10 @@ EventsPipe::EventsPipe(const std::filesystem::path& pipepath,
   // keep it open for output only. Will signal if the client is not maintaining an
   // active reader
   m_fd = open(pipepath.c_str(), O_APPEND | O_WRONLY | O_NDELAY);
-  if (m_fd < 0)
+  if (m_fd < 0) {
+    dout << strerror(errno) << "\n";
     dout << "Opening " << pipepath.c_str() << " failed. No active reader?" << dendl;
+  }
 
   std::cout << "\nerrno is: " << errno << "\n";
 }
