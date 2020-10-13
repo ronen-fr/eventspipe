@@ -312,6 +312,7 @@ TEST_CASE("reg_unreg_events", "[events]")
 
 static string clnt1_path = "/tmp/cpipe1";
 static string clnt2_path = "/tmp/cpipe2";
+static string clnt3_path = "/tmp/cpipe3";
 
 
 TEST_CASE("client_unreg", "[clients]")
@@ -375,9 +376,51 @@ TEST_CASE("report1", "[reports]")
   GET_CLIENT(2, clnt2_path);
   REQUIRE(db.register_for_events(*clnt_2, 200, evmL));
   REQUIRE(db.register_for_events(*clnt_2, 201, evmH));
+  REQUIRE(!db.register_for_events(*clnt_2, 201, evm2));
   REQUIRE(db.should_post(ev_H));
 
   db.post_event("Z", ev_H);
   REQUIRE(rdr2.expect_.vs_expected(from_ev(ev_H, *clnt_2, 201, "Z")));
   REQUIRE(rdr2.expect_.is_empty());
+
+  static constexpr const event_id_t ev_400_3_0x0180{0x400, 0x0003, 0x0180};
+
+  db.post_event("X", ev_400_3_0x0180);
+  REQUIRE(rdr2.expect_.vs_expected(from_ev(ev_400_3_0x0180, *clnt_2, 200, "X")));
+  REQUIRE(rdr2.expect_.is_empty());
+}
+
+// partial bit match
+TEST_CASE("report2", "[reports]")
+{
+  TesteventsDB db;
+
+  // register client 1
+  GET_CLIENT(2, clnt2_path);
+  GET_CLIENT(3, clnt3_path);
+
+  static constexpr const event_id_t msk_F000{0x400, 0x0001, 0xf000};
+  static constexpr const event_id_t msk_000F{0x400, 0x0001, 0x000f};
+
+  REQUIRE(db.register_for_events(*clnt_2, 200, msk_F000));
+  REQUIRE(db.register_for_events(*clnt_3, 300, msk_F000));
+
+  REQUIRE(db.register_for_events(*clnt_2, 201, msk_000F));
+  REQUIRE(db.register_for_events(*clnt_3, 301, msk_000F));
+
+  static constexpr const event_id_t ev_1800{0x400, 0x0001, 0x1800};
+  db.post_event("P", ev_1800);
+  static constexpr const event_id_t ev_0008{0x400, 0x0001, 0x0008};
+  db.post_event("A", ev_0008);
+
+  REQUIRE(rdr3.expect_.vs_expected(from_ev(ev_1800, *clnt_3, 300, "P")));
+  REQUIRE(!rdr3.expect_.vs_expected(from_ev(ev_0008, *clnt_3, 201, "P")));
+  REQUIRE(rdr3.expect_.vs_expected(from_ev(ev_0008, *clnt_3, 301, "A")));
+
+  REQUIRE(rdr2.expect_.vs_expected(from_ev(ev_1800, *clnt_2, 200, "P")));
+  REQUIRE(!rdr2.expect_.vs_expected(from_ev(ev_0008, *clnt_2, 301, "P")));
+  REQUIRE(rdr2.expect_.vs_expected(from_ev(ev_0008, *clnt_2, 201, "A")));
+
+  REQUIRE(rdr2.expect_.is_empty());
+  REQUIRE(rdr3.expect_.is_empty());
 }
