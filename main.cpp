@@ -3,6 +3,8 @@
 #include <fcntl.h>
 #include <sys/epoll.h>
 
+#include <array>
+#include <charconv>
 #include <filesystem>
 #include <iostream>
 #include <string>
@@ -14,20 +16,14 @@
 using namespace std;
 namespace fs = std::filesystem;
 
-#include "te.h"
-
-int main_17()
-{
-
-  std::cout << "Hello, World!" << std::endl;
-  return 0;
-}
-
 #include <sys/stat.h>
 #include <sys/types.h>
 
 #include <atomic>
 #include <thread>
+
+#include "te.h"
+
 
 
 class PipeClientWrap {
@@ -52,7 +48,7 @@ class PipeClientWrap {
     }
   }
 
-  bool is_valid() const { return valid_; }
+  [[nodiscard]] bool is_valid() const { return valid_; }
 
   bool do_stop()
   {
@@ -65,11 +61,35 @@ class PipeClientWrap {
     }
     return was_valid;
   }
+  /// an 'expected' buffer, where we collect the event reports and compare
+  /// against the expected output.
+
+  struct Expected : public ut_out_if {
+    string buf_;
+
+    void push(string sv) final { buf_ = buf_.append(sv); }
+
+    bool vs_expected(string_view sv)  // clears upon failure
+    {
+      // we do not have starts_with() yet,,,
+      if (buf_.substr(0, sv.length()) != sv) {
+	std::cout << "Expected failure. Have: " << buf_ << " vs " << sv << "\n";
+	return false;
+      }
+      buf_.erase(0, sv.length());
+      return true;
+    }
+
+    [[nodiscard]] bool is_empty() const { return buf_.empty(); }
+    void clear() { buf_.clear(); }
+  };
+
+  Expected expect_;
 
  private:
   fs::path fn_;
   string_view name_;
-  std::thread* thrd_;
+  std::thread* thrd_{nullptr};
   bool valid_{false};  // should be made atomic
 
   std::atomic<bool> done_{false};
@@ -283,9 +303,10 @@ TEST_CASE("reg_unreg_events", "[events]")
     REQUIRE(db.should_post(ev_1));
   }
 
-  SECTION("basic_posting") {
-        OutBuf line1{"hello"};
-	db.post_event(line1, ev_1);
+  SECTION("basic_posting")
+  {
+    OutBuf line1{"hello"};
+    db.post_event(line1, ev_1);
   }
 }
 
@@ -309,12 +330,12 @@ TEST_CASE("client_unreg", "[clients]")
   fs::path fpt2{clnt2_path};
   PipeClientWrap reader2{fpt2, "client_unreg 2"};
   REQUIRE(reader2.is_valid());
-  auto client2 = db.client_registration(fpt2, pip_token_t{21}); // same token!
+  auto client2 = db.client_registration(fpt2, pip_token_t{21});	 // same token!
   cout << "Client2 registration (should have failed): " << client2.value_or(9999999);
   REQUIRE(!client2.has_value());
 
   // trying again to register client 2
-  client2 = db.client_registration(fpt2, pip_token_t{22}); // same token!
+  client2 = db.client_registration(fpt2, pip_token_t{22});  // same token!
   cout << "Client2 registration: " << client2.value_or(9999999);
   REQUIRE(client2.has_value());
 
@@ -332,4 +353,31 @@ TEST_CASE("client_unreg", "[clients]")
   db.post_event(line1, ev_H);
   REQUIRE(!db.should_post(ev_H));
   REQUIRE(db.should_post(ev_6));
+  db.post_event(line1, ev_6);
+}
+
+#define GET_CLIENT(N, PIPE)                             \
+  fs::path fpath##N{(PIPE)};                            \
+  PipeClientWrap rdr##N{fpath##N, "Rdr_" #N};           \
+  REQUIRE(rdr##N.is_valid());                           \
+  auto clnt_##N = db.client_registration(fpath##N, {}); \
+  REQUIRE(clnt_##N.has_value());                        \
+  db.add_test_sink(*clnt_##N, &rdr##N.expect_)
+
+
+// test actual events
+
+TEST_CASE("report1", "[reports]")
+{
+  TesteventsDB db;
+
+  // register client 1
+  GET_CLIENT(2, clnt2_path);
+  REQUIRE(db.register_for_events(*clnt_2, 200, evmL));
+  REQUIRE(db.register_for_events(*clnt_2, 201, evmH));
+  REQUIRE(db.should_post(ev_H));
+
+  db.post_event("Z", ev_H);
+  REQUIRE(rdr2.expect_.vs_expected(from_ev(ev_H, *clnt_2, 201, "Z")));
+  REQUIRE(rdr2.expect_.is_empty());
 }

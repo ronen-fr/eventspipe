@@ -1,14 +1,14 @@
 #pragma once
 
+#include <algorithm>  // or just at the .c
 #include <bitset>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <vector>
-#include <mutex>
-#include <memory>
-#include <algorithm> // or just at the .c
 //#include <boost/container/flat_set.hpp>
 #include <map>
 
@@ -57,6 +57,19 @@ using Formatter = std::string;
 
 using OutBuf = std::string_view;
 
+// implementation fit for testingL
+extern std::string from_ev(const event_id_t& ev,
+			   pip_token_t clnt,
+			   event_req_id req,
+			   std::string_view txt);
+
+
+// a unit-test interface to monitor the posts made by the EventsPipe
+
+struct ut_out_if {
+
+  virtual void push(std::string sv) = 0;
+};
 
 /*
 	we need:
@@ -67,29 +80,38 @@ using OutBuf = std::string_view;
 // the pipe of one client
 // MUST BE REF-COUNTED!!!!
 class EventsPipe {
-friend class TesteventsDB;
-public:
+  friend class TesteventsDB;
+
+ public:
   EventsPipe(const std::filesystem::path& pipepath, maybe_pip_token client_token);
   ~EventsPipe();
 
   void discard_pipe(pip_token_t client_token);
   // int get_fd() const { return m_fd; }
-  void send_event(event_req_id, OutBuf buffer);
+  void send_event(event_req_id, const event_id_t& evnt, OutBuf buffer);
 
-  maybe_pip_token get_token() const { return (m_fd >= 0) ? maybe_pip_token{m_token} : maybe_pip_token{}; }
+  [[nodiscard]] maybe_pip_token get_token() const
+  {
+    return (m_fd >= 0) ? maybe_pip_token{m_token} : maybe_pip_token{};
+  }
 
-private:
+  void add_test_sink(ut_out_if* test_out) { test_out_ = test_out; }
+
+ private:
   pip_token_t m_token;
   int m_fd{-1};
   std::filesystem::path m_path;
+  ut_out_if* test_out_{nullptr};
 
   static pip_token_t make_token();
   [[nodiscard]] static bool path_seems_safe(const std::filesystem::path& filepath);
 };
 
 class TesteventRegistration {
-public:
-  TesteventRegistration(EventsPipe& ev_pipe, event_req_id req_id, const event_id_t& ev_id);
+ public:
+  TesteventRegistration(EventsPipe& ev_pipe,
+			event_req_id req_id,
+			const event_id_t& ev_id);
 
   // events_t m_mask;
   event_id_t m_event_id;
@@ -99,25 +121,30 @@ public:
 };
 
 class TesteventsDB {
-public:
+ public:
   TesteventsDB() = default;
 
-  [[nodiscard]] maybe_pip_token client_registration(const std::filesystem::path& pipepath, maybe_pip_token client_token);
+  [[nodiscard]] maybe_pip_token client_registration(const std::filesystem::path& pipepath,
+						    maybe_pip_token client_token);
   void client_unregistration(pip_token_t client_token);
+
+  // and for unit-tests
+  void add_test_sink(pip_token_t client_token, ut_out_if* test_out);
 
 
   [[nodiscard]] bool register_for_events(pip_token_t client_tok,
-                                         event_req_id req_id,
-                                         const event_id_t& ev_id);
+					 event_req_id req_id,
+					 const event_id_t& ev_id);
 
   bool unregister_events(pip_token_t client_tok, event_req_id req_id);
 
-public:  // interface for event posters
-  //bool post_event(OutBuf bf, domain_t domain, group_t grp, events_t evnt);
+ public:  // interface for event posters
+  // bool post_event(OutBuf bf, domain_t domain, group_t grp, events_t evnt);
   void post_event(OutBuf bf, const event_id_t& evnt);
-  bool should_post(const event_id_t& evnt); // so that the client will only prepare the output stream if needed
+  bool should_post(const event_id_t& evnt);  // so that the client will only prepare the
+					     // output stream if needed
 
-private:
+ private:
   /*ceph::*/ Formatter m_formatter;
 
   std::mutex m_pipestbl_lock;

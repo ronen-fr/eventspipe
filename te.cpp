@@ -5,12 +5,16 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <sys/un.h>
+#include <unistd.h>
 
 #include <algorithm>
+#include <array>
+#include <charconv>
 #include <iostream>
 #include <string_view>
+#include <memory>
 
-#include "errno.h"
+#include <cerrno>
 
 //#include "test_events.h"
 #include "te.h"
@@ -59,12 +63,28 @@ on_finish(-EINVAL, e.what(), empty);
 
 // -------------------------------------------------------------------------
 
-/*
-How do we maintain the clients?
-for now - a vector of them.
+std::string from_ev(const event_id_t& ev,
+		    pip_token_t clnt,
+		    event_req_id req,
+		    [[maybe_unused]]  std::string_view txt)
+{
+  std::array<char, 128> b{'\0'};
 
-
-*/
+  std::to_chars_result
+  res = std::to_chars(b.data(), b.data() + b.size(), clnt);
+  *res.ptr++ = '_';
+  res = std::to_chars(res.ptr, b.data() + b.size(), req);
+  *res.ptr++ = '_';
+  res = std::to_chars(res.ptr, b.data() + b.size(), ev.m_domain);
+  *res.ptr++ = '_';
+  res = std::to_chars(res.ptr, b.data() + b.size(), ev.m_group);
+  *res.ptr++ = '_';
+  *res.ptr++ = '0';
+  *res.ptr++ = 'x';
+  res = std::to_chars(res.ptr, b.data() + b.size(), ev.m_event.to_ulong(), 16);
+  *res.ptr++ = '_';
+  return std::string{b.begin(), b.end()}.append(ev.m_event.to_string('_', '1'));
+}
 
 ///
 
@@ -95,7 +115,7 @@ EventsPipe::EventsPipe(const std::filesystem::path& pipepath,
 EventsPipe::~EventsPipe()
 {
   if (m_fd >= 0)
-    ;  // close(m_fd);
+    close(m_fd);
 }
 
 
@@ -138,9 +158,15 @@ pip_token_t EventsPipe::make_token()
   return ++handout;
 }
 
-void EventsPipe::send_event(event_req_id rid, OutBuf buffer)
+void EventsPipe::send_event(event_req_id rid, const event_id_t& evnt, OutBuf buffer)
 {
   std::cout << "WR: to " << m_fd << ": " << rid << " [" << buffer << "]\n";
+  if (test_out_) {
+    auto restxt = from_ev(evnt, m_token, rid, buffer);
+    test_out_->push(restxt);
+  } else {
+    std::cout << "WR: to " << m_fd << ": " << rid << " [" << buffer << "]\n";
+  }
   // write(m_fd, 2, (char*)&rid);
   // write(m_fd, buffer.length(), buffer.
 }
@@ -237,7 +263,7 @@ void TesteventsDB::post_event(OutBuf bf, const event_id_t& evnt)
 	(r.m_event_id.m_event & evnt.m_event).any()) {
 
       // we have a client!
-      r.m_out_pipe->send_event(r.m_req_id, bf);
+      r.m_out_pipe->send_event(r.m_req_id, evnt, bf);
     }
   });
 }
@@ -278,6 +304,18 @@ void TesteventsDB::client_unregistration(pip_token_t client_token)
     m_registrations.end());
 
   m_clients.erase(client_token);
+}
+
+void TesteventsDB::add_test_sink(pip_token_t client_token, ut_out_if* test_out)
+{
+  //  locate the client by its token
+  auto client_en = m_clients.find(client_token);
+  if (client_en == m_clients.end()) {
+    dout << "Events-pipe request from an unknown client." << dendl;
+    return;
+  }
+
+  client_en->second->add_test_sink(test_out);
 }
 
 
