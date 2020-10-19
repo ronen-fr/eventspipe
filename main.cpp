@@ -64,7 +64,7 @@ class PipeClientWrap {
   /// an 'expected' buffer, where we collect the event reports and compare
   /// against the expected output.
 
-  struct Expected : public ut_out_if {
+  struct ExpectedReports : public ut_out_if {
     string buf_;
 
     void push(string sv) final { buf_ = buf_.append(sv); }
@@ -73,7 +73,7 @@ class PipeClientWrap {
     {
       // we do not have starts_with() yet,,,
       if (buf_.substr(0, sv.length()) != sv) {
-	std::cout << "Expected failure. Have: " << buf_ << " vs " << sv << "\n";
+	std::cout << "ExpectedReports failure. Have: " << buf_ << " vs " << sv << "\n";
 	return false;
       }
       buf_.erase(0, sv.length());
@@ -84,18 +84,18 @@ class PipeClientWrap {
     void clear() { buf_.clear(); }
   };
 
-  Expected expect_;
+  ExpectedReports expect_;
 
  private:
   fs::path fn_;
   string_view name_;
   std::thread* thrd_{nullptr};
-  bool valid_{false};  // should be made atomic
+  bool valid_{false};  // should be made atomic.
 
-  std::atomic<bool> done_{false};
+  std::atomic<bool> done_{false};  // should trigger a pollable event
   std::atomic<bool> go_{false};
 
-  static bool verify_name(fs::path fn);
+  static bool verify_name(fs::path filepath);
 
   void poll_until()
   {
@@ -122,6 +122,10 @@ class PipeClientWrap {
       while (!gatep->load()) {
 
 	auto nfds = epoll_wait(epoll_fd, events, 1, 100);
+	if (nfds < 0) {
+	  cout << "Epoll error: " << errno << endl;
+	  break;
+	}
 	// for now - testing one event
 	if (events[0].data.fd == fd) {
 	  char bf[128];

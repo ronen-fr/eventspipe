@@ -86,7 +86,7 @@ class EventsPipe {
   EventsPipe(const std::filesystem::path& pipepath, maybe_pip_token client_token);
   ~EventsPipe();
 
-  void discard_pipe(pip_token_t client_token);
+  void discard_pipe(pip_token_t client_token) noexcept;
   // int get_fd() const { return m_fd; }
   void send_event(event_req_id, const event_id_t& evnt, OutBuf buffer);
 

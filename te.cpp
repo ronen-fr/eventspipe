@@ -9,12 +9,11 @@
 
 #include <algorithm>
 #include <array>
+#include <cerrno>
 #include <charconv>
 #include <iostream>
-#include <string_view>
 #include <memory>
-
-#include <cerrno>
+#include <string_view>
 
 //#include "test_events.h"
 #include "te.h"
@@ -66,12 +65,11 @@ on_finish(-EINVAL, e.what(), empty);
 std::string from_ev(const event_id_t& ev,
 		    pip_token_t clnt,
 		    event_req_id req,
-		    [[maybe_unused]]  std::string_view txt)
+		    [[maybe_unused]] std::string_view txt)
 {
   std::array<char, 128> b{'\0'};
 
-  std::to_chars_result
-  res = std::to_chars(b.data(), b.data() + b.size(), clnt);
+  std::to_chars_result res = std::to_chars(b.data(), b.data() + b.size(), clnt);
   *res.ptr++ = '_';
   res = std::to_chars(res.ptr, b.data() + b.size(), req);
   *res.ptr++ = '_';
@@ -169,6 +167,14 @@ void EventsPipe::send_event(event_req_id rid, const event_id_t& evnt, OutBuf buf
   }
   // write(m_fd, 2, (char*)&rid);
   // write(m_fd, buffer.length(), buffer.
+}
+void EventsPipe::discard_pipe(pip_token_t client_token) noexcept
+{
+  //  int fd_copy = -1;
+  //  std::swap(fd_copy, m_fd);
+  //  ::close(fd_copy);
+  ::close(m_fd);
+  m_fd = -1;
 }
 
 
@@ -280,7 +286,7 @@ maybe_pip_token TesteventsDB::client_registration(const std::filesystem::path& p
   }
 
   // creating separately, as I wish to verify success
-  auto new_ent = make_unique<EventsPipe>(pipepath, client_token);
+  auto new_ent = std::make_unique<EventsPipe>(pipepath, client_token);
   if (!new_ent->get_token()) {
     // can't attach to the specified pipe
     return {};
