@@ -18,7 +18,6 @@ using namespace std;
 namespace fs = std::filesystem;
 
 #include <sys/stat.h>
-#include <sys/types.h>
 
 #include <atomic>
 #include <thread>
@@ -40,7 +39,7 @@ class PipeClientWrap {
 			   // was not created yet
       done_event_fd_ = asnc_loop();
       if (done_event_fd_ < 0) {
-        // a failure starting the read-write thread
+	// a failure starting the read-write thread
 	valid_.store(false);
       }
     }
@@ -80,7 +79,7 @@ class PipeClientWrap {
 
     void push(string sv) final { buf_ = buf_.append(sv); }
 
-    bool vs_expected(string_view sv) noexcept // clears upon failure
+    bool vs_expected(string_view sv) noexcept  // clears upon failure
     {
       // we do not have starts_with() yet,,,
       if (buf_.substr(0, sv.length()) != sv) {
@@ -104,7 +103,7 @@ class PipeClientWrap {
   std::atomic<bool> valid_{false};
   int done_event_fd_{-1};
 
-  static bool verify_name(fs::path filepath);
+  static bool verify_name(const fs::path& filepath);
 
   /// returns the event_fd to use when halting
   [[nodiscard]] int asnc_loop()
@@ -155,7 +154,7 @@ class PipeClientWrap {
 	    write(1, bf, n);
 	  }
 	}
-      };
+      }
       cout << "reader done " << endl;
       close(epoll_fd);
       close(fd);
@@ -167,7 +166,7 @@ class PipeClientWrap {
   }
 };
 
-bool PipeClientWrap::verify_name(fs::path filepath)
+bool PipeClientWrap::verify_name(const fs::path& filepath)
 {
   std::string fn = filepath.string();
 

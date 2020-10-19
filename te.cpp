@@ -3,7 +3,6 @@
 //
 
 #include <fcntl.h>
-#include <poll.h>
 #include <sys/un.h>
 #include <unistd.h>
 
@@ -168,8 +167,11 @@ void EventsPipe::send_event(event_req_id rid, const event_id_t& evnt, OutBuf buf
   // write(m_fd, 2, (char*)&rid);
   // write(m_fd, buffer.length(), buffer.
 }
-void EventsPipe::discard_pipe(pip_token_t client_token) noexcept
+
+void EventsPipe::discard_pipe([[maybe_unused]] pip_token_t client_token) noexcept
 {
+  // should verify the token... and then remove the [[maybe_unused]]
+
   //  int fd_copy = -1;
   //  std::swap(fd_copy, m_fd);
   //  ::close(fd_copy);
