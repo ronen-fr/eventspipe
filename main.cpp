@@ -35,7 +35,8 @@ class PipeClientWrap {
     }
 
     if (mkfifo(fn.c_str(), 0644) == 0) {
-      valid_ = true;
+      valid_.store(true);  // the atomic op is not really needed here, as the other thread
+			   // was not created yet
       poll_until();
     }
   }
@@ -46,20 +47,24 @@ class PipeClientWrap {
     if (do_stop()) {
       unlink(fn_.c_str());
     }
+    /* for testing */ std::cout << "extra killing: " << do_stop() << "\n";
   }
 
-  [[nodiscard]] bool is_valid() const { return valid_; }
+  [[nodiscard]] bool is_valid() const { return valid_.load(); }
 
   bool do_stop()
   {
-    bool was_valid = valid_;
-    if (valid_) {
-      valid_ = false;
+
+    if (valid_.exchange(false)) {
+      valid_.store(false);
       done_.store(true);
-      while (done_.load())
-	usleep(100'000);
+      // while (done_.load())
+      // usleep(100'000);
+      thrd_->join();
+      delete thrd_;
+      return true;
     }
-    return was_valid;
+    return false;
   }
   /// an 'expected' buffer, where we collect the event reports and compare
   /// against the expected output.
@@ -90,10 +95,8 @@ class PipeClientWrap {
   fs::path fn_;
   string_view name_;
   std::thread* thrd_{nullptr};
-  bool valid_{false};  // should be made atomic.
-
+  std::atomic<bool> valid_{false};
   std::atomic<bool> done_{false};  // should trigger a pollable event
-  std::atomic<bool> go_{false};
 
   static bool verify_name(fs::path filepath);
 
@@ -103,7 +106,7 @@ class PipeClientWrap {
 
     if (fd <= 0) {
       cout << "Reader cannot open " << fn_.c_str() << "\n";
-      valid_ = false;
+      valid_.store(false);
       return;
     }
 
@@ -127,7 +130,7 @@ class PipeClientWrap {
 	  break;
 	}
 	// for now - testing one event
-	if (events[0].data.fd == fd) {
+	if (nfds > 0 && events[0].data.fd == fd) {
 	  char bf[128];
 	  auto n = read(fd, bf, sizeof(bf));
 	  write(1, bf, n);
@@ -140,36 +143,36 @@ class PipeClientWrap {
       gatep->store(false);
     });
 
-    thrd_->detach();
+    // thrd_->detach();
   }
 
-  void read_till()
-  {
-    int fd = open(fn_.c_str(), O_RDWR);
-
-    if (fd <= 0) {
-      cout << "Reader cannot open " << fn_.c_str() << "\n";
-      valid_ = false;
-      return;
-    }
-
-    cout << "reader opnd " << fn_.c_str() << endl;
-
-    thrd_ = new std::thread([this, fd, gatep = &done_]() {
-      while (!gatep->load()) {
-	char bf[128];
-	auto n = read(fd, bf, sizeof(bf));
-	write(2, bf, n);
-      };
-      cout << "reader done " << endl;
-      valid_ = false;
-      gatep->store(false);
-    });
-
-    thrd_->detach();
-    // while (!go_.load())
-    //  sleep(1);
-  }
+  //  void read_till()
+  //  {
+  //    int fd = open(fn_.c_str(), O_RDWR);
+  //
+  //    if (fd <= 0) {
+  //      cout << "Reader cannot open " << fn_.c_str() << "\n";
+  //      valid_ = false;
+  //      return;
+  //    }
+  //
+  //    cout << "reader opnd " << fn_.c_str() << endl;
+  //
+  //    thrd_ = new std::thread([this, fd, gatep = &done_]() {
+  //      while (!gatep->load()) {
+  //	char bf[128];
+  //	auto n = read(fd, bf, sizeof(bf));
+  //	write(2, bf, n);
+  //      };
+  //      cout << "reader done " << endl;
+  //      valid_ = false;
+  //      gatep->store(false);
+  //    });
+  //
+  //    thrd_->detach();
+  //    // while (!go_.load())
+  //    //  sleep(1);
+  //  }
 };
 
 bool PipeClientWrap::verify_name(fs::path filepath)
