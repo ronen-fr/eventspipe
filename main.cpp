@@ -2,6 +2,7 @@
 #define CATCH_CONFIG_MAIN
 #include <fcntl.h>
 #include <sys/epoll.h>
+#include <sys/eventfd.h>
 
 #include <array>
 #include <charconv>
@@ -37,7 +38,11 @@ class PipeClientWrap {
     if (mkfifo(fn.c_str(), 0644) == 0) {
       valid_.store(true);  // the atomic op is not really needed here, as the other thread
 			   // was not created yet
-      poll_until();
+      done_event_fd_ = asnc_loop();
+      if (done_event_fd_ < 0) {
+        // a failure starting the read-write thread
+	valid_.store(false);
+      }
     }
   }
 
@@ -54,18 +59,19 @@ class PipeClientWrap {
 
   bool do_stop()
   {
-
     if (valid_.exchange(false)) {
       valid_.store(false);
-      done_.store(true);
-      // while (done_.load())
-      // usleep(100'000);
+
+      uint64_t stop_val{1};
+      write(done_event_fd_, &stop_val, sizeof(stop_val));
+
       thrd_->join();
       delete thrd_;
       return true;
     }
     return false;
   }
+
   /// an 'expected' buffer, where we collect the event reports and compare
   /// against the expected output.
 
@@ -74,7 +80,7 @@ class PipeClientWrap {
 
     void push(string sv) final { buf_ = buf_.append(sv); }
 
-    bool vs_expected(string_view sv)  // clears upon failure
+    bool vs_expected(string_view sv) noexcept // clears upon failure
     {
       // we do not have starts_with() yet,,,
       if (buf_.substr(0, sv.length()) != sv) {
@@ -96,83 +102,69 @@ class PipeClientWrap {
   string_view name_;
   std::thread* thrd_{nullptr};
   std::atomic<bool> valid_{false};
-  std::atomic<bool> done_{false};  // should trigger a pollable event
+  int done_event_fd_{-1};
 
   static bool verify_name(fs::path filepath);
 
-  void poll_until()
+  /// returns the event_fd to use when halting
+  [[nodiscard]] int asnc_loop()
   {
     int fd = open(fn_.c_str(), O_RDWR);
 
     if (fd <= 0) {
       cout << "Reader cannot open " << fn_.c_str() << "\n";
       valid_.store(false);
-      return;
+      return -1;
     }
 
     cout << "reader opnd " << fn_.c_str() << endl;
 
+    auto epoll_fd = epoll_create(2);
     struct epoll_event ev;
 
-    auto epoll_fd = epoll_create(1);
+    // create the eventfd
+    int event_fd = eventfd(0ULL, EFD_CLOEXEC);
+    ev.events = EPOLLIN;
+    ev.data.fd = event_fd;
+    epoll_ctl(epoll_fd, EPOLL_CTL_ADD, event_fd, &ev);
+
     ev.events = EPOLLIN;
     ev.data.fd = fd;
-
     epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &ev);
 
-    thrd_ = new std::thread([this, epoll_fd, fd, gatep = &done_]() {
+    thrd_ = new std::thread([this, epoll_fd, event_fd, fd]() {
+      bool go = true;
       struct epoll_event events[4];
-      while (!gatep->load()) {
+      while (go) {
 
-	auto nfds = epoll_wait(epoll_fd, events, 1, 100);
+	auto nfds = epoll_wait(epoll_fd, events, 4, 100);
 	if (nfds < 0) {
 	  cout << "Epoll error: " << errno << endl;
 	  break;
 	}
-	// for now - testing one event
-	if (nfds > 0 && events[0].data.fd == fd) {
-	  char bf[128];
-	  auto n = read(fd, bf, sizeof(bf));
-	  write(1, bf, n);
+
+	for (int i = 0; i < nfds; ++i) {
+	  // for now - testing one event
+	  if (events[i].data.fd == event_fd) {
+	    go = false;
+	  }
+
+	  if (events[i].data.fd == fd) {
+	    char bf[128];
+	    auto n = read(fd, bf, sizeof(bf));
+	    write(1, bf, n);
+	  }
 	}
       };
       cout << "reader done " << endl;
-      close(fd);
       close(epoll_fd);
-      valid_ = false;
-      gatep->store(false);
+      close(fd);
+      close(event_fd);
+      valid_.store(false);
     });
 
-    // thrd_->detach();
+    return event_fd;
   }
-
-  //  void read_till()
-  //  {
-  //    int fd = open(fn_.c_str(), O_RDWR);
-  //
-  //    if (fd <= 0) {
-  //      cout << "Reader cannot open " << fn_.c_str() << "\n";
-  //      valid_ = false;
-  //      return;
-  //    }
-  //
-  //    cout << "reader opnd " << fn_.c_str() << endl;
-  //
-  //    thrd_ = new std::thread([this, fd, gatep = &done_]() {
-  //      while (!gatep->load()) {
-  //	char bf[128];
-  //	auto n = read(fd, bf, sizeof(bf));
-  //	write(2, bf, n);
-  //      };
-  //      cout << "reader done " << endl;
-  //      valid_ = false;
-  //      gatep->store(false);
-  //    });
-  //
-  //    thrd_->detach();
-  //    // while (!go_.load())
-  //    //  sleep(1);
-  //  }
 };
 
 bool PipeClientWrap::verify_name(fs::path filepath)
